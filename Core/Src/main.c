@@ -33,8 +33,8 @@
 /* USER CODE BEGIN PD */
 int16_t accel_x_raw, accel_y_raw, accel_z_raw;
 int16_t gyro_x_raw, gyro_y_raw, gyro_z_raw;
-uint16_t Ax, Ay, Az;
-uint16_t Gx, Gy, Gz;
+float Ax, Ay, Az;
+float Gx, Gy, Gz;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -101,10 +101,10 @@ void MPU6050_Read_Accel (void)
   accel_y_raw = (int16_t)(Rec_Data[2] << 8 | Rec_Data[3]); // Y-axis
   accel_z_raw = (int16_t)(Rec_Data[4] << 8 | Rec_Data[5]); // Z-axis
 
-  // Unit Conversion to 'g'
-  Ax = accel_x_raw / 16384.0;
-  Ay = accel_y_raw / 16384.0;
-  Az = accel_z_raw / 16384.0;
+  // Unit Conversion to 'm/s^2'
+  Ax = accel_x_raw / 16384.0 * 9.81f;;
+  Ay = accel_y_raw / 16384.0 * 9.81f;;
+  Az = accel_z_raw / 16384.0 * 9.81f;;
 }
 
 void MPU6050_Read_Gyro (void)
@@ -173,7 +173,7 @@ int main(void)
 
     // print to UART
     char buffer[100];
-    int len = snprintf(buffer, sizeof(buffer), "Ax: %.2d g, Ay: %.2d g, Az: %.2d g, Gx: %.2d °/s, Gy: %.2d °/s, Gz: %.2d °/s\r\n", Ax, Ay, Az, Gx, Gy, Gz);
+    int len = snprintf(buffer, sizeof(buffer), "Ax: %.2f m/s^2, Ay: %.2f m/s^2, Az: %.2f m/s^2, Gx: %.2f °/s, Gy: %.2f °/s, Gz: %.2f °/s\r\n", Ax, Ay, Az, Gx, Gy, Gz);
     HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, 1000);
     HAL_Delay(500);
     /* USER CODE BEGIN 3 */
