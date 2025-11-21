@@ -1,41 +1,48 @@
-# Prerequisites
-*.d
+# ---------------
+# PlatformIO
+# ---------------
+.pio/
+.pioenvs/
+.piolibdeps/
 
-# Compiled Object files
-*.slo
-*.lo
+# ---------------
+# STM32CubeIDE / Eclipse
+# ---------------
+# Ignore Eclipse-based project files if you want a clean repo
+# (Keep these commented out if you share the project with CubeIDE users)
+.project
+.cproject
+.mxproject
+.settings/
+
+# STM32CubeIDE Build Output
+Debug/
+Release/
+
+# ---------------
+# VS Code
+# ---------------
+# Ignore local user settings and auto-generated properties
+.vscode/
+# Exception: You might want to un-comment the next line if you share launch configurations
+# !.vscode/launch.json
+
+# ---------------
+# Compiled Output & Artifacts
+# ---------------
+*.elf
+*.bin
+*.hex
+*.map
 *.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
-*.lib
+*.lo
+*.obj
+*.d
+*.su
 
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
+# ---------------
+# OS / System
+# ---------------
+.DS_Store
+Thumbs.db

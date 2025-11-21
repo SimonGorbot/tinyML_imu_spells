@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include <stdio.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -66,7 +66,7 @@ static void MX_I2C1_Init(void);
 
 void MPU6050_Init (void)
 {
-  uint8 check, data;
+  uint8_t check, data;
   // check device ID WHO_AM_I register
   HAL_I2C_Mem_Read(&hi2c1, MPU6050_ADDR, WHO_AM_I_REG, 1, &check, 1, 1000);
   if (check == 104) // 0x68 will be returned by the sensor if everything goes well
@@ -173,7 +173,7 @@ int main(void)
 
     // print to UART
     char buffer[100];
-    int len = snprintf(buffer, sizeof(buffer), "Ax: %.2f g, Ay: %.2f g, Az: %.2f g, Gx: %.2f °/s, Gy: %.2f °/s, Gz: %.2f °/s\r\n", Ax, Ay, Az, Gx, Gy, Gz);
+    int len = snprintf(buffer, sizeof(buffer), "Ax: %.2d g, Ay: %.2d g, Az: %.2d g, Gx: %.2d °/s, Gy: %.2d °/s, Gz: %.2d °/s\r\n", Ax, Ay, Az, Gx, Gy, Gz);
     HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, 1000);
     HAL_Delay(500);
     /* USER CODE BEGIN 3 */
