@@ -21,7 +21,8 @@
 #include <stdio.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "NanoEdgeAI.h"
+#include "knowledge.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,7 +50,14 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input values
+float output_class_buffer[CLASS_NUMBER]; // Buffer of class probabilities
+uint16_t id_class = 0; // Point to id class
+const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
+	"unknown",
+	"verticalshake",
+	"horizontalshake",
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -58,7 +66,10 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-
+void MPU6050_Init(void);
+void MPU6050_Read_Accel(void);
+void MPU6050_Read_Gyro(void);
+void fill_buffer(float sample_buffer[]);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -123,6 +134,22 @@ void MPU6050_Read_Gyro (void)
   Gz = gyro_z_raw / 131.0;
 }
 
+/* * Collects 19 samples of Ax, Ay, Az to fill the input buffer
+ */
+void fill_buffer(float sample_buffer[])
+{
+    for(int i = 0; i < DATA_INPUT_USER; i++)
+    {
+        MPU6050_Read_Accel();
+        // MPU6050_Read_Gyro(); // Uncomment if your model also uses Gyro data
+        
+        sample_buffer[AXIS_NUMBER * i]     = Ax;
+        sample_buffer[AXIS_NUMBER * i + 1] = Ay;
+        sample_buffer[AXIS_NUMBER * i + 2] = Az;
+        
+        HAL_Delay(20); // Sampling delay
+    }
+}
 
 /* USER CODE END 0 */
 
@@ -160,6 +187,14 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   MPU6050_Init();
+  
+  // Initialize NanoEdge AI
+  enum neai_state error_code = neai_classification_init(knowledge);
+  if (error_code != NEAI_OK) {
+      char error_msg[50];
+      int len = snprintf(error_msg, sizeof(error_msg), "NEAI Init Error: %d\r\n", error_code);
+      HAL_UART_Transmit(&huart2, (uint8_t*)error_msg, len, 1000);
+  }
 
   /* USER CODE END 2 */
 
@@ -168,15 +203,19 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    MPU6050_Read_Accel();
-    MPU6050_Read_Gyro();
+    
+    // 1. Collect Data
+    fill_buffer(input_user_buffer);
+    
+    // 2. Run Classification
+    neai_classification(input_user_buffer, output_class_buffer, &id_class);
 
-    // print to UART
+    // 3. Print Results
     char buffer[100];
-    // int len = snprintf(buffer, sizeof(buffer), "Ax: %.2f m/s^2, Ay: %.2f m/s^2, Az: %.2f m/s^2, Gx: %.2f °/s, Gy: %.2f °/s, Gz: %.2f °/s\r\n", Ax, Ay, Az, Gx, Gy, Gz);
-    int len = snprintf(buffer, sizeof(buffer),"%.4f, %.4f, %.4f \n",Ax, Ay, Az);
+    // Print the class name and confidence of the identified class
+    int len = snprintf(buffer, sizeof(buffer), "Class: %s (Prob: %.2f)\r\n", id2class[id_class], output_class_buffer[id_class]);
     HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, 1000);
-    HAL_Delay(20);
+    
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -355,7 +394,7 @@ void Error_Handler(void)
 #ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
+  * where the assert_param error has occurred.
   * @param  file: pointer to the source file name
   * @param  line: assert_param error line source number
   * @retval None
