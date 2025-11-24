@@ -218,20 +218,39 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   const uint32_t poll_interval_ms = 20U;
-
+  GPIO_PinState btn_prev = GPIO_PIN_SET; // Assume button is initially released
   while (1)
   {
     /* USER CODE END WHILE */
 
-    if (LIS3DH_Read_Accel() == 0)
-    {
-      char buffer[80];
-      int len = snprintf(buffer, sizeof(buffer),"%.4f, %.4f, %.4f \n",Ax, Ay, Az);
-      HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, HAL_MAX_DELAY);
-    }
-    HAL_Delay(poll_interval_ms); // Poll sensor close to the 400 Hz ODR
-
     /* USER CODE BEGIN 3 */
+    // Read the current state of the User Button (B1)
+    // B1 is active Low (GPIO_PIN_RESET when pressed)
+    GPIO_PinState btn_curr = HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin);
+
+    // 1. Detect the start of a press (Falling Edge: Released -> Pressed)
+    if (btn_prev == GPIO_PIN_SET && btn_curr == GPIO_PIN_RESET)
+    {
+        char *header = "NEW_RUN\n";
+        HAL_UART_Transmit(&huart2, (uint8_t *)header, strlen(header), HAL_MAX_DELAY);
+    }
+
+    // 2. Only output data while the button is held down
+    if (btn_curr == GPIO_PIN_RESET)
+    {
+        if (LIS3DH_Read_Accel() == 0)
+        {
+          char buffer[80];
+          int len = snprintf(buffer, sizeof(buffer), "%.4f, %.4f, %.4f \n", Ax, Ay, Az);
+          HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, HAL_MAX_DELAY);
+        }
+    }
+
+    // Update previous state for the next iteration
+    btn_prev = btn_curr;
+
+    // Poll delay (acts as a simple debounce)
+    HAL_Delay(poll_interval_ms); 
   }
   /* USER CODE END 3 */
 }
