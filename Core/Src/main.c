@@ -217,7 +217,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  const uint32_t poll_interval_ms = 2U;
+  const uint32_t poll_interval_ms = 20U;
 
   while (1)
   {
@@ -226,9 +226,7 @@ int main(void)
     if (LIS3DH_Read_Accel() == 0)
     {
       char buffer[80];
-      int len = snprintf(buffer, sizeof(buffer),
-                         "Ax: %.3f g, Ay: %.3f g, Az: %.3f g\r\n",
-                         Ax, Ay, Az);
+      int len = snprintf(buffer, sizeof(buffer),"%.4f, %.4f, %.4f \n",Ax, Ay, Az);
       HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, HAL_MAX_DELAY);
     }
     HAL_Delay(poll_interval_ms); // Poll sensor close to the 400 Hz ODR
