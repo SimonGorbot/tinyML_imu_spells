@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lis3dh_reg.h"
+#include "NanoEdgeAI.h"
+#include "knowledge.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +44,7 @@ float Ax, Ay, Az;
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 #define LIS3DH_ADDR (0x19U << 1) // Adjust according to your SA0 wiring
+#define MAX_RAW_SAMPLES 1000     // Maximum samples to store during button press
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -50,7 +53,19 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+/* NanoEdgeAI Variables */
+uint16_t id_class = 0;
+float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER];
+float output_class_buffer[CLASS_NUMBER];
+const char *id2class[CLASS_NUMBER + 1] = {
+    "unknown",
+    "six",
+    "seven",
+};
 
+/* Data Collection Variables */
+float raw_data[MAX_RAW_SAMPLES * AXIS_NUMBER];
+uint16_t raw_count = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,6 +77,7 @@ static void MX_I2C1_Init(void);
 static void LIS3DH_ContextInit(void);
 static int32_t LIS3DH_Init(void);
 static int32_t LIS3DH_Read_Accel(void);
+static void normalize_buffer(float *source, uint16_t source_len, float *dest, uint16_t dest_len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -170,6 +186,34 @@ static int32_t LIS3DH_Read_Accel(void)
   return 0;
 }
 
+/**
+ * @brief Normalize (interpolate) collected data to fit the model input buffer.
+ * Note: If the user requires 200 rows, ensure DATA_INPUT_USER is 200 in NanoEdgeAI.h
+ */
+static void normalize_buffer(float *source, uint16_t source_len, float *dest, uint16_t dest_len)
+{
+    if (source_len == 0 || dest_len == 0) return;
+
+    for (int i = 0; i < dest_len; i++)
+    {
+        // Calculate the floating point index in the source array
+        float pos = (float)i * (source_len - 1) / (dest_len - 1);
+        int idx = (int)pos;
+        float frac = pos - idx;
+
+        // Interpolate for all axes
+        for (int axis = 0; axis < AXIS_NUMBER; axis++)
+        {
+            float val0 = source[idx * AXIS_NUMBER + axis];
+            float val1 = source[(idx + 1) * AXIS_NUMBER + axis];
+            // Handle last element edge case
+            if (idx >= source_len - 1) val1 = val0; 
+            
+            dest[i * AXIS_NUMBER + axis] = val0 + frac * (val1 - val0);
+        }
+    }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -213,6 +257,14 @@ int main(void)
     Error_Handler();
   }
 
+  // Initialize NanoEdge AI with the knowledge buffer
+  enum neai_state status = neai_classification_init(knowledge);
+  if (status != NEAI_OK) {
+      char buffer[50];
+      int len = snprintf(buffer, sizeof(buffer), "NEAI Init Error: %d\r\n", status);
+      HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+  }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -231,18 +283,48 @@ int main(void)
     // 1. Detect the start of a press (Falling Edge: Released -> Pressed)
     if (btn_prev == GPIO_PIN_SET && btn_curr == GPIO_PIN_RESET)
     {
-        char *header = "NEW_RUN\n";
+        char *header = "Recording...\r\n";
         HAL_UART_Transmit(&huart2, (uint8_t *)header, strlen(header), HAL_MAX_DELAY);
+        raw_count = 0; // Reset counter for new recording
     }
 
-    // 2. Only output data while the button is held down
+    // 2. Collect data while the button is held down
     if (btn_curr == GPIO_PIN_RESET)
     {
-        if (LIS3DH_Read_Accel() == 0)
+        if (raw_count < MAX_RAW_SAMPLES)
         {
-          char buffer[80];
-          int len = snprintf(buffer, sizeof(buffer), "%.4f, %.4f, %.4f \n", Ax, Ay, Az);
-          HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, HAL_MAX_DELAY);
+            if (LIS3DH_Read_Accel() == 0)
+            {
+                // Store raw values
+                raw_data[raw_count * AXIS_NUMBER + 0] = Ax;
+                raw_data[raw_count * AXIS_NUMBER + 1] = Ay;
+                raw_data[raw_count * AXIS_NUMBER + 2] = Az;
+                raw_count++;
+            }
+        }
+    }
+
+    // 3. Detect the end of a press (Rising Edge: Pressed -> Released)
+    if (btn_prev == GPIO_PIN_RESET && btn_curr == GPIO_PIN_SET)
+    {
+        if (raw_count > 0)
+        {
+            // Normalize data to exactly DATA_INPUT_USER rows (200 as requested, set in header)
+            normalize_buffer(raw_data, raw_count, input_user_buffer, DATA_INPUT_USER);
+
+            // Run Classification
+            neai_classification(input_user_buffer, output_class_buffer, &id_class);
+
+            char buffer[1000]; 
+            if (id_class > 0) {
+                int len = snprintf(buffer, sizeof(buffer), "Class: %s (Prob: %.2f)\r\n", 
+                                  id2class[id_class], 
+                                  output_class_buffer[id_class - 1]); // <--- Subtract 1 here
+                HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, 1000);
+            } else {
+                // Optional: Handle "unknown" case
+                HAL_UART_Transmit(&huart2, (uint8_t*)"Class: unknown\r\n", 16, 1000);
+            }
         }
     }
 
