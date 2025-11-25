@@ -59,8 +59,11 @@ float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER];
 float output_class_buffer[CLASS_NUMBER];
 const char *id2class[CLASS_NUMBER + 1] = {
     "unknown",
-    "six",
-    "seven",
+    "circle-ccw",
+    "circle-cw",
+    "square-ccw",
+    "square-cw",
+    "lightning"
 };
 
 /* Data Collection Variables */

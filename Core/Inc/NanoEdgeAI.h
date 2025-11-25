@@ -31,10 +31,10 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*
 #include <stdint.h>
 
 /* Define */
-#define NEAI_ID "6924fb1547d331ac2853fdb4"
+#define NEAI_ID "69263dc547d331ac28540808"
 #define AXIS_NUMBER 3
-#define DATA_INPUT_USER 70
-#define CLASS_NUMBER 2
+#define DATA_INPUT_USER 100
+#define CLASS_NUMBER 5
 
 #ifndef __NEAI_STATE__
 #define __NEAI_STATE__
@@ -88,8 +88,11 @@ float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input value
 float output_class_buffer[CLASS_NUMBER]; // Buffer of class probabilities
 const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
 	"unknown",
-	"six",
-	"seven",
+	"lightning",
+	"flat-square-cw",
+	"flat-square-ccw",
+	"falt-circle-cw",
+	"falt-circle-ccw",
 };
 */
 
