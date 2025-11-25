@@ -45,3 +45,8 @@ Release/
 # ---------------
 .DS_Store
 Thumbs.db
+
+# Python
+venv/
+runs/
+runs_normalized/
