@@ -2,19 +2,11 @@ import pandas as pd
 import numpy as np
 import os
 import glob
-import re
 
 # ================= CONFIGURATION =================
 TARGET_ROWS = 200
 INPUT_DIR = "runs"
 OUTPUT_DIR = "runs_normalized"
-
-# Regex to capture [name] and [timestamp]
-# Matches:
-#   1. Name (anything until the hyphen before the timestamp)
-#   2. Timestamp starting with digits, containing dashes/underscores
-# Updates: Now accepts dates like '11-24' (2 parts) or '2025-11-24' (3 parts)
-FILENAME_PATTERN = r"^(.*)-(\d{2,4}-\d{2}(?:-\d{2})?_\d{2}-\d{2}-\d{2})\.csv$"
 # =================================================
 
 def normalize_run(data, target_length):
@@ -67,17 +59,8 @@ def main():
     # 4. Process Each File
     for file_path in csv_files:
         filename = os.path.basename(file_path)
-        
-        # Parse the filename
-        match = re.match(FILENAME_PATTERN, filename)
-        if not match:
-            print(f"[SKIP] '{filename}' does not match format [name]-[timestamp].csv")
-            continue
-
-        name_part = match.group(1)
-        timestamp_part = match.group(2)
-        
-        print(f"[PROCESS] {filename} (Name: {name_part}, Time: {timestamp_part})")
+        base_name, extension = os.path.splitext(filename)
+        print(f"[PROCESS] {filename}")
 
         try:
             df = pd.read_csv(file_path)
@@ -91,6 +74,14 @@ def main():
                 end_col = start_col + 3
                 
                 run_data = df.iloc[:, start_col:end_col]
+                
+                # Check for minimum number of rows before processing
+                valid_rows = run_data.dropna()
+                if len(valid_rows) < 10:
+                    cols_to_skip = df.columns[start_col:end_col].tolist()
+                    print(f"   -> Skipping run (cols: {cols_to_skip}): has only {len(valid_rows)} rows (min 10).")
+                    continue
+
                 normalized_data = normalize_run(run_data, TARGET_ROWS)
                 
                 # Keep original column names
@@ -101,14 +92,14 @@ def main():
             if processed_runs:
                 result_df = pd.concat(processed_runs, axis=1)
 
-                # Construct new filename: [name]_normalized_[timestamp].csv
-                output_filename = f"{name_part}_normalized_{timestamp_part}.csv"
+                # Construct new filename: [original_name]_normalized.csv
+                output_filename = f"{base_name}_normalized{extension}"
                 output_path = os.path.join(OUTPUT_DIR, output_filename)
                 
                 result_df.to_csv(output_path, index=False)
                 print(f"   -> Saved to: {output_path}")
             else:
-                print("   -> No valid data columns found.")
+                print("   -> No valid runs to save after filtering.")
 
         except Exception as e:
             print(f"   -> Error processing file: {e}")

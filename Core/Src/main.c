@@ -242,7 +242,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  const uint32_t poll_interval_ms = 50U;
+  const uint32_t poll_interval_ms = 5U;
   GPIO_PinState btn_prev = GPIO_PIN_SET;
   while (1)
   {
