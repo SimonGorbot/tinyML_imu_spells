@@ -54,6 +54,7 @@ static void MX_I2C1_Init(void);
 static void MPU9250_Init(void);
 static void MPU9250_Print_WhoAmI(void);
 static void MPU9250_ReadAndPrint(void);
+static void MPU9250_ReadAndPrintRaw(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -165,6 +166,41 @@ static void MPU9250_ReadAndPrint(void)
   HAL_UART_Transmit(&huart2, (uint8_t *)buffer, (uint16_t)len_written, HAL_MAX_DELAY);
 }
 
+static void MPU9250_ReadAndPrintRaw(void)
+{
+  int16_t accel_raw[1][3];
+  float accel_g[1][3];
+  int16_t gyro_raw[1][3];
+  float gyro_dps[1][3];
+  int16_t mag_raw[1][3];
+  float mag_ut[1][3];
+  uint16_t len = 1;
+
+  if (mpu9250_read(&s_mpu9250_handle,
+                   accel_raw,
+                   accel_g,
+                   gyro_raw,
+                   gyro_dps,
+                   mag_raw,
+                   mag_ut,
+                   &len) != 0 ||
+      len == 0)
+  {
+    const char *msg = "MPU9250: raw read failed\r\n";
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+    return;
+  }
+
+  char buffer[160];
+  int len_written = snprintf(buffer,
+                             sizeof(buffer),
+                             "%d, %d, %d, %d, %d,%d, %d, %d, %d\r\n",
+                             accel_raw[0][0], accel_raw[0][1], accel_raw[0][2],
+                             gyro_raw[0][0], gyro_raw[0][1], gyro_raw[0][2],
+                             mag_raw[0][0], mag_raw[0][1], mag_raw[0][2]);
+  HAL_UART_Transmit(&huart2, (uint8_t *)buffer, (uint16_t)len_written, HAL_MAX_DELAY);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -217,13 +253,13 @@ int main(void)
 
     if (btn_prev == GPIO_PIN_SET && btn_curr == GPIO_PIN_RESET)
     {
-      const char *header = "NEW_RUN\n";
+      const char *header = "NEW_RUN\r\n";
       HAL_UART_Transmit(&huart2, (uint8_t *)header, strlen(header), HAL_MAX_DELAY);
     }
 
     if (btn_curr == GPIO_PIN_RESET)
     {
-      MPU9250_ReadAndPrint();
+      MPU9250_ReadAndPrintRaw();
     }
 
     btn_prev = btn_curr;
