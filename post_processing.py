@@ -29,12 +29,10 @@ def normalize_run(data, target_length):
     if current_length == 0:
         return np.zeros((target_length, 3)) 
 
-    if current_length > target_length:
-        return data[:target_length]
-    
-    elif current_length < target_length:
+    # If lengths are different, interpolate. 
+    if current_length != target_length:
         original_indices = np.arange(current_length)
-        new_indices = np.linspace(0, current_length - 1, target_length)
+        new_indices = np.linspace(0, current_length - 1, target_length) # Creates evenly spaced points
         
         new_data = np.zeros((target_length, 3))
         for col in range(3):
