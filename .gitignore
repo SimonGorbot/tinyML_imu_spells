@@ -50,3 +50,4 @@ Thumbs.db
 venv/
 runs/
 runs_normalized/
+runs_good/
