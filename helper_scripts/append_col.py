@@ -5,7 +5,7 @@ import numpy as np
 
 def append_columns_by_prefix(folder_path, output_folder):
     # The three prefixes we are looking for
-    prefixes = ['leftright', 'rightleft', 'updown']
+    prefixes = ['left_right', 'right_left', 'up_down']
     
     # Ensure output directory exists
     os.makedirs(output_folder, exist_ok=True)
