@@ -4,7 +4,7 @@ import os
 import glob
 
 # ================= CONFIGURATION =================
-TARGET_ROWS = 200
+TARGET_ROWS = 100
 INPUT_DIR = "runs"
 OUTPUT_DIR = "runs_normalized"
 # =================================================
@@ -65,27 +65,39 @@ def main():
         try:
             df = pd.read_csv(file_path)
             
-            processed_runs = []
             num_runs = len(df.columns) // 3
+            if num_runs == 0:
+                print("   -> No data columns found.")
+                continue
 
-            # Normalize each run (group of 3 columns)
+            # First pass: Get the number of valid rows for each run
+            run_row_counts = []
             for i in range(num_runs):
                 start_col = i * 3
                 end_col = start_col + 3
-                
                 run_data = df.iloc[:, start_col:end_col]
-                
-                # Check for minimum number of rows before processing
-                valid_rows = run_data.dropna()
-                if len(valid_rows) < 10:
-                    cols_to_skip = df.columns[start_col:end_col].tolist()
-                    print(f"   -> Skipping run (cols: {cols_to_skip}): has only {len(valid_rows)} rows (min 10).")
-                    continue
+                run_row_counts.append(len(run_data.dropna()))
 
+            # Calculate statistics for row counts
+            mean_rows = np.mean(run_row_counts)
+            std_rows = np.std(run_row_counts)
+            lower_bound = mean_rows - 1.5 * std_rows
+            upper_bound = mean_rows + 1.5 * std_rows
+            print(f"   -> Stats: Mean rows={mean_rows:.1f}, Std Dev={std_rows:.1f}. Valid range: [{lower_bound:.1f}, {upper_bound:.1f}]")
+
+            # Second pass: Filter, normalize, and collect runs
+            processed_runs = []
+            for i in range(num_runs):
+                if not (lower_bound <= run_row_counts[i] <= upper_bound):
+                    cols_to_skip = df.columns[i*3 : i*3+3].tolist()
+                    print(f"   -> Skipping run (cols: {cols_to_skip}): {run_row_counts[i]} rows is outside range.")
+                    continue
+                
+                run_data = df.iloc[:, i*3 : i*3+3]
                 normalized_data = normalize_run(run_data, TARGET_ROWS)
                 
                 # Keep original column names
-                cols = df.columns[start_col:end_col]
+                cols = df.columns[i*3 : i*3+3]
                 run_df = pd.DataFrame(normalized_data, columns=cols)
                 processed_runs.append(run_df)
 
