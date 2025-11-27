@@ -2,7 +2,7 @@
 /**
  ******************************************************************************
  * @file           : main.c
- * @brief          : Main program body for NanoEdge AI Inference with MPU9250
+ * @brief          : Main program body
  ******************************************************************************
  * @attention
  *
@@ -20,24 +20,33 @@
 #include "main.h"
 #include <stdio.h>
 #include <string.h>
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "driver_mpu9250.h"
-#include "driver_mpu9250_interface.h"
 #include "NanoEdgeAI.h"
 #include "knowledge.h"
+#include "driver_mpu9250.h"
+#include "driver_mpu9250_interface.h"
 /* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+typedef union
+{
+  int16_t i16bit[3];
+  uint8_t u8bit[6];
+} axis3bit16_t;
+/* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MPU9250_ADDR MPU9250_ADDRESS_AD0_LOW
-#define MPU9250_REG_WHO_AM_I 0x75U
+float Ax, Ay, Az, Gx, Gy, Gz, Mx, My, Mz;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+#define MPU9250_ADDR MPU9250_ADDRESS_AD0_LOW
+#define MPU9250_REG_WHO_AM_I 0x75U
+#define MAX_RAW_SAMPLES 1000U
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -46,15 +55,21 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-/* NanoEdge AI variables */
-uint16_t id_class = 0; 
-float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input values
-float output_class_buffer[CLASS_NUMBER]; // Buffer of class probabilities
+/* NanoEdgeAI Variables */
+uint16_t id_class = 0;
+float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER];
+float output_class_buffer[CLASS_NUMBER];
 const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
 	"unknown",
-	"verticalshake",
-	"horizontalshake",
+	"UpDown",
+	"RightLeft",
+	"LeftRight",
 };
+
+/* Data Collection Variables */
+float raw_data[MAX_RAW_SAMPLES * AXIS_NUMBER];
+uint16_t raw_count = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,13 +78,40 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
+static void normalize_buffer(float *source, uint16_t source_len, float *dest, uint16_t dest_len);
 static void MPU9250_Init(void);
 static void MPU9250_Print_WhoAmI(void);
+static uint8_t MPU9250_ReadRaw(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 static mpu9250_handle_t s_mpu9250_handle;
+
+static void normalize_buffer(float *source, uint16_t source_len, float *dest, uint16_t dest_len)
+{
+    if (source_len == 0 || dest_len == 0) return;
+
+    for (int i = 0; i < dest_len; i++)
+    {
+        // Calculate the floating point index in the source array
+        float pos = (float)i * (source_len - 1) / (dest_len - 1);
+        int idx = (int)pos;
+        float frac = pos - idx;
+
+        // Interpolate for all axes
+        for (int axis = 0; axis < AXIS_NUMBER; axis++)
+        {
+            float val0 = source[idx * AXIS_NUMBER + axis];
+            float val1 = source[(idx + 1) * AXIS_NUMBER + axis];
+            // Handle last element edge case
+            if (idx >= source_len - 1) val1 = val0; 
+            
+            dest[i * AXIS_NUMBER + axis] = val0 + frac * (val1 - val0);
+        }
+    }
+}
+
 
 static void MPU9250_Print_WhoAmI(void)
 {
@@ -125,14 +167,12 @@ static void MPU9250_Init(void)
     Error_Handler();
   }
 
-  /* Configuration for 100 Hz Sample Rate (consistent with NEAI typically) */
-  /* 1 kHz / (1 + 9) = 100 Hz */
+  /* Example configuration: 1 kHz / (1 + div) = 100 Hz */
   (void)mpu9250_set_sample_rate_divider(&s_mpu9250_handle, 9);
   (void)mpu9250_set_low_pass_filter(&s_mpu9250_handle, MPU9250_LOW_PASS_FILTER_3);
   (void)mpu9250_set_accelerometer_range(&s_mpu9250_handle, MPU9250_ACCELEROMETER_RANGE_2G);
   (void)mpu9250_set_gyroscope_range(&s_mpu9250_handle, MPU9250_GYROSCOPE_RANGE_250DPS);
-  
-  // Note: Magnetometer init kept if needed, but NEAI usually just uses accel
+
   if (mpu9250_mag_init(&s_mpu9250_handle) != 0)
   {
     const char *msg = "MPU9250: mag init failed\r\n";
@@ -142,6 +182,43 @@ static void MPU9250_Init(void)
   (void)mpu9250_mag_set_bits(&s_mpu9250_handle, MPU9250_MAGNETOMETER_BITS_16);
   (void)mpu9250_mag_set_mode(&s_mpu9250_handle, MPU9250_MAGNETOMETER_MODE_CONTINUOUS2);
 }
+
+static uint8_t MPU9250_ReadRaw(void)
+{
+  int16_t accel_raw[1][3];
+  float accel_g[1][3];
+  int16_t gyro_raw[1][3];
+  float gyro_dps[1][3];
+  int16_t mag_raw[1][3];
+  float mag_ut[1][3];
+  uint16_t len = 1;
+
+  if (mpu9250_read(&s_mpu9250_handle,
+                   accel_raw,
+                   accel_g,
+                   gyro_raw,
+                   gyro_dps,
+                   mag_raw,
+                   mag_ut,
+                   &len) != 0 ||
+      len == 0)
+  {
+    return 1; // Error
+  }
+
+  Ax = (float)accel_g[0][0];
+  Ay = (float)accel_g[0][1];
+  Az = (float)accel_g[0][2];
+  Gx = (float)gyro_dps[0][0];
+  Gy = (float)gyro_dps[0][1];
+  Gz = (float)gyro_dps[0][2];
+  Mx = (float)mag_ut[0][0];
+  My = (float)mag_ut[0][1];
+  Mz = (float)mag_ut[0][2];
+
+  return 0; // Success
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -150,6 +227,7 @@ static void MPU9250_Init(void)
  */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -175,80 +253,92 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  
-  // Initialize MPU9250
   MPU9250_Print_WhoAmI();
   MPU9250_Init();
-  
-  // Initialize NanoEdge AI
-  enum neai_state neai_res = neai_classification_init(knowledge);
-  if (neai_res != NEAI_OK) {
-      char err_buf[50];
-      snprintf(err_buf, sizeof(err_buf), "NEAI Init Error: %d\r\n", neai_res);
-      HAL_UART_Transmit(&huart2, (uint8_t *)err_buf, strlen(err_buf), HAL_MAX_DELAY);
-  } else {
-      const char *msg = "NEAI Init Success\r\n";
-      HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+
+
+  // Initialize NanoEdge AI with the knowledge buffer
+  enum neai_state status = neai_classification_init(knowledge);
+  if (status != NEAI_OK) {
+      char buffer[50];
+      int len = snprintf(buffer, sizeof(buffer), "NEAI Init Error: %d\r\n", status);
+      HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
   }
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  
-  // Buffers for MPU9250 reading
-  int16_t accel_raw[1][3];
-  float accel_g[1][3];
-  int16_t gyro_raw[1][3];
-  float gyro_dps[1][3];
-  int16_t mag_raw[1][3];
-  float mag_ut[1][3];
-  uint16_t len = 1;
-  
+  const uint32_t poll_interval_ms = 20U;
+  GPIO_PinState btn_prev = GPIO_PIN_SET; // Assume button is initially released
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    
-    // 1. Fill the Input Buffer
-    // We need to collect DATA_INPUT_USER samples (defined as 19 in NanoEdgeAI.h)
-    for (int i = 0; i < DATA_INPUT_USER; i++) {
-        if (mpu9250_read(&s_mpu9250_handle,
-                         accel_raw,
-                         accel_g,
-                         gyro_raw,
-                         gyro_dps,
-                         mag_raw,
-                         mag_ut,
-                         &len) != 0 || len == 0)
-        {
-             // Handle read error
-             continue;
-        }
-        
-        // Convert RAW int16_t to float for the buffer
-        // Note: Using RAW values because data collection exports RAW
-        input_user_buffer[AXIS_NUMBER * i]     = (float)accel_raw[0][0];
-        input_user_buffer[AXIS_NUMBER * i + 1] = (float)accel_raw[0][1];
-        input_user_buffer[AXIS_NUMBER * i + 2] = (float)accel_raw[0][2];
-        
-        // Wait 10ms to match the 100Hz ODR configured in Init
-        HAL_Delay(10); 
+    // Read the current state of the User Button (B1)
+    // B1 is active Low (GPIO_PIN_RESET when pressed)
+    GPIO_PinState btn_curr = HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin);
+
+    // 1. Detect the start of a press (Falling Edge: Released -> Pressed)
+    if (btn_prev == GPIO_PIN_SET && btn_curr == GPIO_PIN_RESET)
+    {
+        char *header = "Recording...\r\n";
+        HAL_UART_Transmit(&huart2, (uint8_t *)header, strlen(header), HAL_MAX_DELAY);
+        raw_count = 0; // Reset counter for new recording
     }
 
-    // 2. Perform Classification
-    neai_classification(input_user_buffer, output_class_buffer, &id_class);
+    // 2. Collect data while the button is held down
+    if (btn_curr == GPIO_PIN_RESET)
+    {
+        if (raw_count < MAX_RAW_SAMPLES)
+        {
+            if (MPU9250_ReadRaw() == 0)
+            {
+                // Store raw values
+                raw_data[raw_count * AXIS_NUMBER + 0] = Ax;
+                raw_data[raw_count * AXIS_NUMBER + 1] = Ay;
+                raw_data[raw_count * AXIS_NUMBER + 2] = Az;
+                raw_data[raw_count * AXIS_NUMBER + 3] = Gx;
+                raw_data[raw_count * AXIS_NUMBER + 4] = Gy;
+                raw_data[raw_count * AXIS_NUMBER + 5] = Gz;
+                raw_data[raw_count * AXIS_NUMBER + 6] = Mx;
+                raw_data[raw_count * AXIS_NUMBER + 7] = My;
+                raw_data[raw_count * AXIS_NUMBER + 8] = Mz;
+                raw_count++;
+            }
+        }
+    }
 
-    // 3. Output Result
-    char out_buf[64];
-    // Print class name from the id2class mapping
-    int printed_len = snprintf(out_buf, sizeof(out_buf), "Class detected: %s (Prob: %.2f)\r\n", 
-             id2class[id_class], output_class_buffer[id_class]);
-    HAL_UART_Transmit(&huart2, (uint8_t *)out_buf, (uint16_t)printed_len, HAL_MAX_DELAY);
-    
-    // Optional: Toggle LED to show activity
-    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+    // 3. Detect the end of a press (Rising Edge: Pressed -> Released)
+    if (btn_prev == GPIO_PIN_RESET && btn_curr == GPIO_PIN_SET)
+    {
+        if (raw_count > 0)
+        {
+            // Normalize data to exactly DATA_INPUT_USER rows (200 as requested, set in header)
+            normalize_buffer(raw_data, raw_count, input_user_buffer, DATA_INPUT_USER);
+
+            // Run Classification
+            neai_classification(input_user_buffer, output_class_buffer, &id_class);
+
+            char buffer[1000]; 
+            if (id_class > 0) {
+                int len = snprintf(buffer, sizeof(buffer), "Class: %s (Prob: %.2f)\r\n", 
+                                  id2class[id_class], 
+                                  output_class_buffer[id_class - 1]); // <--- Subtract 1 here
+                HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, 1000);
+            } else {
+                // Optional: Handle "unknown" case
+                HAL_UART_Transmit(&huart2, (uint8_t*)"Class: unknown\r\n", 16, 1000);
+            }
+        }
+    }
+
+    // Update previous state for the next iteration
+    btn_prev = btn_curr;
+
+    // Poll delay (acts as a simple debounce)
+    HAL_Delay(poll_interval_ms); 
   }
   /* USER CODE END 3 */
 }
@@ -305,6 +395,14 @@ void SystemClock_Config(void)
  */
 static void MX_I2C1_Init(void)
 {
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
   hi2c1.Init.ClockSpeed = 100000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
@@ -318,6 +416,9 @@ static void MX_I2C1_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
 }
 
 /**
@@ -327,6 +428,14 @@ static void MX_I2C1_Init(void)
  */
 static void MX_USART2_UART_Init(void)
 {
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
@@ -339,6 +448,9 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 }
 
 /**
@@ -349,6 +461,9 @@ static void MX_USART2_UART_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -371,7 +486,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
+  /* USER CODE END MX_GPIO_Init_2 */
 }
+
+/* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
 
 /**
  * @brief  This function is executed in case of error occurrence.
@@ -379,14 +502,27 @@ static void MX_GPIO_Init(void)
  */
 void Error_Handler(void)
 {
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
   {
   }
+  /* USER CODE END Error_Handler_Debug */
 }
-
 #ifdef USE_FULL_ASSERT
+/**
+ * @brief  Reports the name of the source file and the source line number
+ * where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
