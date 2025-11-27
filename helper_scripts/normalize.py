@@ -5,8 +5,8 @@ import glob
 
 # ================= CONFIGURATION =================
 TARGET_ROWS = 100
-INPUT_DIR = "runs"
-OUTPUT_DIR = "runs_normalized"
+DEFAULT_INPUT_DIR = "runs"
+DEFAULT_OUTPUT_DIR = "runs_normalized"
 # =================================================
 
 def normalize_run(data, target_length):
@@ -37,24 +37,24 @@ def normalize_run(data, target_length):
     else:
         return data
 
-def main():
+def process_and_normalize_runs(input_dir, output_dir, target_rows):
     # 1. Check Input Directory
-    if not os.path.exists(INPUT_DIR):
-        print(f"Error: Input directory '{INPUT_DIR}' does not exist.")
+    if not os.path.exists(input_dir):
+        print(f"Error: Input directory '{input_dir}' does not exist.")
         return
 
     # 2. Check/Create Output Directory
-    if not os.path.exists(OUTPUT_DIR):
-        print(f"Creating output directory: {OUTPUT_DIR}")
-        os.makedirs(OUTPUT_DIR)
+    if not os.path.exists(output_dir):
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir)
 
     # 3. Find all CSVs
-    csv_files = glob.glob(os.path.join(INPUT_DIR, "*.csv"))
+    csv_files = glob.glob(os.path.join(input_dir, "*.csv"))
     if not csv_files:
-        print(f"No CSV files found in '{INPUT_DIR}'.")
+        print(f"No CSV files found in '{input_dir}'.")
         return
 
-    print(f"Found {len(csv_files)} files in '{INPUT_DIR}'...")
+    print(f"Found {len(csv_files)} files in '{input_dir}'...")
 
     # 4. Process Each File
     for file_path in csv_files:
@@ -94,7 +94,7 @@ def main():
                     continue
                 
                 run_data = df.iloc[:, i*3 : i*3+3]
-                normalized_data = normalize_run(run_data, TARGET_ROWS)
+                normalized_data = normalize_run(run_data, target_rows)
                 
                 # Keep original column names
                 cols = df.columns[i*3 : i*3+3]
@@ -106,7 +106,7 @@ def main():
 
                 # Construct new filename: [original_name]_normalized.csv
                 output_filename = f"{base_name}_normalized{extension}"
-                output_path = os.path.join(OUTPUT_DIR, output_filename)
+                output_path = os.path.join(output_dir, output_filename)
                 
                 result_df.to_csv(output_path, index=False)
                 print(f"   -> Saved to: {output_path}")
@@ -119,4 +119,4 @@ def main():
     print("\nProcessing complete.")
 
 if __name__ == "__main__":
-    main()
+    process_and_normalize_runs(DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR, TARGET_ROWS)

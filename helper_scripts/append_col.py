@@ -63,9 +63,9 @@ def append_columns_by_prefix(folder_path, output_folder):
             df_truncated.to_csv(file_path, index=False)
             print(f"   - Truncated {os.path.basename(file_path)} from {df.shape[1]} to {min_cols} columns.")
 
-# --- USAGE ---
-# Replace with the path to your folder containing the CSVs
-input_folder = 'runs_normalized'
-output_folder = 'runs_appended'
+if __name__ == "__main__":
+    # Default configuration for standalone execution
+    DEFAULT_INPUT_FOLDER = 'runs_normalized'
+    DEFAULT_OUTPUT_FOLDER = 'runs_appended'
 
-append_columns_by_prefix(input_folder, output_folder)
+    append_columns_by_prefix(DEFAULT_INPUT_FOLDER, DEFAULT_OUTPUT_FOLDER)
