@@ -118,8 +118,8 @@ static void MPU9250_Init(void)
   /* Example configuration: 1 kHz / (1 + div) = 100 Hz */
   (void)mpu9250_set_sample_rate_divider(&s_mpu9250_handle, 9);
   (void)mpu9250_set_low_pass_filter(&s_mpu9250_handle, MPU9250_LOW_PASS_FILTER_3);
-  (void)mpu9250_set_accelerometer_range(&s_mpu9250_handle, MPU9250_ACCELEROMETER_RANGE_2G);
-  (void)mpu9250_set_gyroscope_range(&s_mpu9250_handle, MPU9250_GYROSCOPE_RANGE_250DPS);
+  (void)mpu9250_set_accelerometer_range(&s_mpu9250_handle, MPU9250_ACCELEROMETER_RANGE_16G);
+  (void)mpu9250_set_gyroscope_range(&s_mpu9250_handle, MPU9250_GYROSCOPE_RANGE_2000DPS);
 
   if (mpu9250_mag_init(&s_mpu9250_handle) != 0)
   {
