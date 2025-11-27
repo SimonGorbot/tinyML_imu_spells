@@ -59,11 +59,12 @@ UART_HandleTypeDef huart2;
 uint16_t id_class = 0;
 float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER];
 float output_class_buffer[CLASS_NUMBER];
-const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
-	"unknown",
-	"UpDown",
-	"RightLeft",
-	"LeftRight",
+const char *id2class[CLASS_NUMBER + 1] = {
+    // Buffer for mapping class id to class name
+    "unknown",
+    "UpDown",
+    "RightLeft",
+    "LeftRight",
 };
 
 /* Data Collection Variables */
@@ -90,28 +91,30 @@ static mpu9250_handle_t s_mpu9250_handle;
 
 static void normalize_buffer(float *source, uint16_t source_len, float *dest, uint16_t dest_len)
 {
-    if (source_len == 0 || dest_len == 0) return;
+  if (source_len == 0 || dest_len == 0)
+    return;
 
-    for (int i = 0; i < dest_len; i++)
+  for (int i = 0; i < dest_len; i++)
+  {
+    // Calculate the floating point index in the source array
+    float pos = (float)i * (source_len - 1) / (dest_len - 1);
+    int idx = (int)pos;
+    float frac = pos - idx;
+
+    // Interpolate for all axes
+    for (int axis = 0; axis < AXIS_NUMBER; axis++)
     {
-        // Calculate the floating point index in the source array
-        float pos = (float)i * (source_len - 1) / (dest_len - 1);
-        int idx = (int)pos;
-        float frac = pos - idx;
+      float val0 = source[idx * AXIS_NUMBER + axis];
+      float val1 = val0;
+      if ((idx + 1) < source_len)
+      {
+        val1 = source[(idx + 1) * AXIS_NUMBER + axis];
+      }
 
-        // Interpolate for all axes
-        for (int axis = 0; axis < AXIS_NUMBER; axis++)
-        {
-            float val0 = source[idx * AXIS_NUMBER + axis];
-            float val1 = source[(idx + 1) * AXIS_NUMBER + axis];
-            // Handle last element edge case
-            if (idx >= source_len - 1) val1 = val0; 
-            
-            dest[i * AXIS_NUMBER + axis] = val0 + frac * (val1 - val0);
-        }
+      dest[i * AXIS_NUMBER + axis] = val0 + frac * (val1 - val0);
     }
+  }
 }
-
 
 static void MPU9250_Print_WhoAmI(void)
 {
@@ -206,15 +209,16 @@ static uint8_t MPU9250_ReadRaw(void)
     return 1; // Error
   }
 
-  Ax = (float)accel_g[0][0];
-  Ay = (float)accel_g[0][1];
-  Az = (float)accel_g[0][2];
-  Gx = (float)gyro_dps[0][0];
-  Gy = (float)gyro_dps[0][1];
-  Gz = (float)gyro_dps[0][2];
-  Mx = (float)mag_ut[0][0];
-  My = (float)mag_ut[0][1];
-  Mz = (float)mag_ut[0][2];
+  // Use raw integer samples to stay consistent with NanoEdge training data
+  Ax = (float)accel_raw[0][0];
+  Ay = (float)accel_raw[0][1];
+  Az = (float)accel_raw[0][2];
+  Gx = (float)gyro_raw[0][0];
+  Gy = (float)gyro_raw[0][1];
+  Gz = (float)gyro_raw[0][2];
+  Mx = (float)mag_raw[0][0];
+  My = (float)mag_raw[0][1];
+  Mz = (float)mag_raw[0][2];
 
   return 0; // Success
 }
@@ -256,20 +260,20 @@ int main(void)
   MPU9250_Print_WhoAmI();
   MPU9250_Init();
 
-
   // Initialize NanoEdge AI with the knowledge buffer
   enum neai_state status = neai_classification_init(knowledge);
-  if (status != NEAI_OK) {
-      char buffer[50];
-      int len = snprintf(buffer, sizeof(buffer), "NEAI Init Error: %d\r\n", status);
-      HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+  if (status != NEAI_OK)
+  {
+    char buffer[50];
+    int len = snprintf(buffer, sizeof(buffer), "NEAI Init Error: %d\r\n", status);
+    HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
   }
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  const uint32_t poll_interval_ms = 20U;
+  const uint32_t poll_interval_ms = 5U;
   GPIO_PinState btn_prev = GPIO_PIN_SET; // Assume button is initially released
   while (1)
   {
@@ -283,62 +287,78 @@ int main(void)
     // 1. Detect the start of a press (Falling Edge: Released -> Pressed)
     if (btn_prev == GPIO_PIN_SET && btn_curr == GPIO_PIN_RESET)
     {
-        char *header = "Recording...\r\n";
-        HAL_UART_Transmit(&huart2, (uint8_t *)header, strlen(header), HAL_MAX_DELAY);
-        raw_count = 0; // Reset counter for new recording
+      char *header = "Recording...\r\n";
+      HAL_UART_Transmit(&huart2, (uint8_t *)header, strlen(header), HAL_MAX_DELAY);
+      raw_count = 0; // Reset counter for new recording
     }
 
     // 2. Collect data while the button is held down
     if (btn_curr == GPIO_PIN_RESET)
     {
-        if (raw_count < MAX_RAW_SAMPLES)
+      if (raw_count < MAX_RAW_SAMPLES)
+      {
+        if (MPU9250_ReadRaw() == 0)
         {
-            if (MPU9250_ReadRaw() == 0)
-            {
-                // Store raw values
-                raw_data[raw_count * AXIS_NUMBER + 0] = Ax;
-                raw_data[raw_count * AXIS_NUMBER + 1] = Ay;
-                raw_data[raw_count * AXIS_NUMBER + 2] = Az;
-                raw_data[raw_count * AXIS_NUMBER + 3] = Gx;
-                raw_data[raw_count * AXIS_NUMBER + 4] = Gy;
-                raw_data[raw_count * AXIS_NUMBER + 5] = Gz;
-                raw_data[raw_count * AXIS_NUMBER + 6] = Mx;
-                raw_data[raw_count * AXIS_NUMBER + 7] = My;
-                raw_data[raw_count * AXIS_NUMBER + 8] = Mz;
-                raw_count++;
-            }
+          // Store raw values
+          raw_data[raw_count * AXIS_NUMBER + 0] = Ax;
+          raw_data[raw_count * AXIS_NUMBER + 1] = Ay;
+          raw_data[raw_count * AXIS_NUMBER + 2] = Az;
+          raw_data[raw_count * AXIS_NUMBER + 3] = Gx;
+          raw_data[raw_count * AXIS_NUMBER + 4] = Gy;
+          raw_data[raw_count * AXIS_NUMBER + 5] = Gz;
+          raw_data[raw_count * AXIS_NUMBER + 6] = Mx;
+          raw_data[raw_count * AXIS_NUMBER + 7] = My;
+          raw_data[raw_count * AXIS_NUMBER + 8] = Mz;
+          raw_count++;
         }
+      }
     }
 
     // 3. Detect the end of a press (Rising Edge: Pressed -> Released)
     if (btn_prev == GPIO_PIN_RESET && btn_curr == GPIO_PIN_SET)
     {
-        if (raw_count > 0)
-        {
-            // Normalize data to exactly DATA_INPUT_USER rows (200 as requested, set in header)
-            normalize_buffer(raw_data, raw_count, input_user_buffer, DATA_INPUT_USER);
+      if (raw_count > 0)
+      {
+        // Normalize data to exactly DATA_INPUT_USER rows (200 as requested, set in header)
+        normalize_buffer(raw_data, raw_count, input_user_buffer, DATA_INPUT_USER);
 
-            // Run Classification
-            neai_classification(input_user_buffer, output_class_buffer, &id_class);
+        // Run Classification
+        enum neai_state cls_status = neai_classification(input_user_buffer, output_class_buffer, &id_class);
 
-            char buffer[1000]; 
-            if (id_class > 0) {
-                int len = snprintf(buffer, sizeof(buffer), "Class: %s (Prob: %.2f)\r\n", 
-                                  id2class[id_class], 
-                                  output_class_buffer[id_class - 1]); // <--- Subtract 1 here
-                HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, 1000);
-            } else {
-                // Optional: Handle "unknown" case
-                HAL_UART_Transmit(&huart2, (uint8_t*)"Class: unknown\r\n", 16, 1000);
-            }
+        char buffer[256];
+        if (cls_status != NEAI_OK) {
+          int len = snprintf(buffer, sizeof(buffer), "NEAI Error: %d\r\n", cls_status);
+          HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+        } else {
+          if (id_class > 0)
+          {
+            int len = snprintf(buffer, sizeof(buffer),
+                               "Class: %s (Prob: %.2f) | UpDown=%.2f RightLeft=%.2f LeftRight=%.2f\r\n",
+                               id2class[id_class],
+                               output_class_buffer[id_class - 1],
+                               output_class_buffer[0],
+                               output_class_buffer[1],
+                               output_class_buffer[2]); // <--- Subtract 1 here
+            HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+          }
+          else
+          {
+            int len = snprintf(buffer, sizeof(buffer),
+                               "Class: unknown | UpDown=%.2f RightLeft=%.2f LeftRight=%.2f\r\n",
+                               output_class_buffer[0],
+                               output_class_buffer[1],
+                               output_class_buffer[2]);
+            HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+          }
         }
+      }
     }
 
     // Update previous state for the next iteration
     btn_prev = btn_curr;
 
     // Poll delay (acts as a simple debounce)
-    HAL_Delay(poll_interval_ms); 
+    HAL_Delay(poll_interval_ms);
   }
   /* USER CODE END 3 */
 }
