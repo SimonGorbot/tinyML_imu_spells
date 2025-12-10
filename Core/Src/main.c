@@ -39,12 +39,12 @@ typedef union
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-float Ax, Ay, Az, Gx, Gy, Gz, Mx, My, Mz;
+float Ax, Ay, Az, Gx, Gy, Gz;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define MPU9250_ADDR MPU9250_ADDRESS_AD0_LOW
+#define MPU9250_ADDR MPU9250_ADDRESS_AD0_HIGH
 #define MPU9250_REG_WHO_AM_I 0x75U
 #define MAX_RAW_SAMPLES 1000U
 /* USER CODE END PM */
@@ -176,14 +176,7 @@ static void MPU9250_Init(void)
   (void)mpu9250_set_accelerometer_range(&s_mpu9250_handle, MPU9250_ACCELEROMETER_RANGE_2G);
   (void)mpu9250_set_gyroscope_range(&s_mpu9250_handle, MPU9250_GYROSCOPE_RANGE_250DPS);
 
-  if (mpu9250_mag_init(&s_mpu9250_handle) != 0)
-  {
-    const char *msg = "MPU9250: mag init failed\r\n";
-    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
-    Error_Handler();
-  }
-  (void)mpu9250_mag_set_bits(&s_mpu9250_handle, MPU9250_MAGNETOMETER_BITS_16);
-  (void)mpu9250_mag_set_mode(&s_mpu9250_handle, MPU9250_MAGNETOMETER_MODE_CONTINUOUS2);
+
 }
 
 static uint8_t MPU9250_ReadRaw(void)
@@ -216,9 +209,6 @@ static uint8_t MPU9250_ReadRaw(void)
   Gx = (float)gyro_raw[0][0];
   Gy = (float)gyro_raw[0][1];
   Gz = (float)gyro_raw[0][2];
-  Mx = (float)mag_raw[0][0];
-  My = (float)mag_raw[0][1];
-  Mz = (float)mag_raw[0][2];
 
   return 0; // Success
 }
@@ -306,9 +296,6 @@ int main(void)
           raw_data[raw_count * AXIS_NUMBER + 3] = Gx;
           raw_data[raw_count * AXIS_NUMBER + 4] = Gy;
           raw_data[raw_count * AXIS_NUMBER + 5] = Gz;
-          raw_data[raw_count * AXIS_NUMBER + 6] = Mx;
-          raw_data[raw_count * AXIS_NUMBER + 7] = My;
-          raw_data[raw_count * AXIS_NUMBER + 8] = Mz;
           raw_count++;
         }
       }
