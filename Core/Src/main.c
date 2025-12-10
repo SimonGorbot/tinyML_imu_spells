@@ -62,10 +62,9 @@ float output_class_buffer[CLASS_NUMBER];                // Buffer of class proba
 const char *id2class[CLASS_NUMBER + 1] = {
     // Buffer for mapping class id to class name
     "unknown",
-    "combined_updown",
-    "combined_rightleft",
-    "combined_leftright",
-    "combined_downup",
+    "up_down_formatted",
+    "right_left_formatted",
+    "left_right_simon_formatted",
 };
 
 /* Data Collection Variables */
@@ -217,10 +216,6 @@ static uint8_t MPU9250_ReadRaw(void)
   Gx = (float)gyro_raw[0][0];
   Gy = (float)gyro_raw[0][1];
   Gz = (float)gyro_raw[0][2];
-  // Mx = (float)mag_raw[0][0];
-  // My = (float)mag_raw[0][1];
-  // Mz = (float)mag_raw[0][2];
-
   return 0; // Success
 }
 
@@ -307,9 +302,6 @@ int main(void)
           raw_data[raw_count * AXIS_NUMBER + 3] = Gx;
           raw_data[raw_count * AXIS_NUMBER + 4] = Gy;
           raw_data[raw_count * AXIS_NUMBER + 5] = Gz;
-          // raw_data[raw_count * AXIS_NUMBER + 6] = Mx;
-          // raw_data[raw_count * AXIS_NUMBER + 7] = My;
-          // raw_data[raw_count * AXIS_NUMBER + 8] = Mz;
           raw_count++;
         }
       }
@@ -322,18 +314,7 @@ int main(void)
       {
         char buffer[256];
 
-        // Require enough samples to match the model window
-        if (raw_count < DATA_INPUT_USER)
-        {
-          int len = snprintf(buffer, sizeof(buffer),
-                             "Not enough samples: %u/%u. Hold button longer.\r\n",
-                             raw_count,
-                             (uint16_t)DATA_INPUT_USER);
-          HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
-          goto update_btn_state;
-        }
-
-        // Cap to the expected window size
+        // Cap to the expected window size (otherwise interpolate up to fit)
         uint16_t samples_to_process = raw_count;
         if (samples_to_process > DATA_INPUT_USER)
         {
@@ -357,16 +338,18 @@ int main(void)
         }
         else
         {
+          // Note: if raw_count < DATA_INPUT_USER we interpolate up to the model window
+          // size so classification still runs on shorter captures.
           if (id_class > 0)
           {
+            // Only log the three class probabilities (output buffer is length CLASS_NUMBER)
             int len = snprintf(buffer, sizeof(buffer),
-                               "Class: %s (Prob: %.2f) | UpDown=%.2f RightLeft=%.2f LeftRight=%.2f DownUp=%.2f\r\n",
+                               "Class: %s (Prob: %.2f) | UpDown=%.2f RightLeft=%.2f LeftRight=%.2f\r\n",
                                id2class[id_class],
                                output_class_buffer[id_class - 1],
                                output_class_buffer[0],
                                output_class_buffer[1],
-                               output_class_buffer[2],
-                               output_class_buffer[3]); // <--- Subtract 1 here
+                               output_class_buffer[2]);
             HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
           }
           else
@@ -382,7 +365,6 @@ int main(void)
       }
     }
 
-  update_btn_state:
     // Update previous state for the next iteration
     btn_prev = btn_curr;
 
