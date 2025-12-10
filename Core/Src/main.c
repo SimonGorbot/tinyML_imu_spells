@@ -176,14 +176,7 @@ static void MPU9250_Init(void)
   (void)mpu9250_set_accelerometer_range(&s_mpu9250_handle, MPU9250_ACCELEROMETER_RANGE_2G);
   (void)mpu9250_set_gyroscope_range(&s_mpu9250_handle, MPU9250_GYROSCOPE_RANGE_250DPS);
 
-  if (mpu9250_mag_init(&s_mpu9250_handle) != 0)
-  {
-    const char *msg = "MPU9250: mag init failed\r\n";
-    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
-    Error_Handler();
-  }
-  (void)mpu9250_mag_set_bits(&s_mpu9250_handle, MPU9250_MAGNETOMETER_BITS_16);
-  (void)mpu9250_mag_set_mode(&s_mpu9250_handle, MPU9250_MAGNETOMETER_MODE_CONTINUOUS2);
+
 }
 
 static uint8_t MPU9250_ReadRaw(void)
@@ -216,6 +209,7 @@ static uint8_t MPU9250_ReadRaw(void)
   Gx = (float)gyro_raw[0][0];
   Gy = (float)gyro_raw[0][1];
   Gz = (float)gyro_raw[0][2];
+
   return 0; // Success
 }
 
