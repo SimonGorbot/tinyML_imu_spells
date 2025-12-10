@@ -31,33 +31,35 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*
 #include <stdint.h>
 
 /* Define */
-#define NEAI_ID "6927c79147d331ac285419fd"
-#define AXIS_NUMBER 9
-#define DATA_INPUT_USER 100
-#define CLASS_NUMBER 3
+#define NEAI_ID "6938dece2c86c4cb08b78efd"
+#define AXIS_NUMBER 6
+#define DATA_INPUT_USER 906
+#define CLASS_NUMBER 4
 
 #ifndef __NEAI_STATE__
 #define __NEAI_STATE__
-enum neai_state { 
-    NEAI_OK = 0,
-    NEAI_INIT_FCT_NOT_CALLED = 123,
-    NEAI_BOARD_ERROR,
-    NEAI_KNOWLEDGE_BUFFER_ERROR,
-    NEAI_NOT_ENOUGH_CALL_TO_LEARNING, //This is a fail-safe to prevent users from learning one or even no signals.
-    NEAI_MINIMAL_RECOMMENDED_LEARNING_DONE,
-    NEAI_UNKNOWN_ERROR,
+enum neai_state
+{
+	NEAI_OK = 0,
+	NEAI_INIT_FCT_NOT_CALLED = 123,
+	NEAI_BOARD_ERROR,
+	NEAI_KNOWLEDGE_BUFFER_ERROR,
+	NEAI_NOT_ENOUGH_CALL_TO_LEARNING, // This is a fail-safe to prevent users from learning one or even no signals.
+	NEAI_MINIMAL_RECOMMENDED_LEARNING_DONE,
+	NEAI_UNKNOWN_ERROR,
 
-    /* Error due to a potential compatibility issue affecting user of the ARMCC toolchain.
-     * Contact our support for further details or consider using a different toolchain */
-    NEAI_COMPILER_ERROR
+	/* Error due to a potential compatibility issue affecting user of the ARMCC toolchain.
+	 * Contact our support for further details or consider using a different toolchain */
+	NEAI_COMPILER_ERROR
 };
 #endif
 /* Function prototypes */
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 	/**
-	 * @brief  Initialization must be called at the beginning to load the knowledge. 
+	 * @brief  Initialization must be called at the beginning to load the knowledge.
 	 *         This buffer is defined in the header file knowledge.h provided in the .zip file
 	 * @retval NEAI_OK in case of success.
 	 */
@@ -88,9 +90,9 @@ float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input value
 float output_class_buffer[CLASS_NUMBER]; // Buffer of class probabilities
 const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
 	"unknown",
-	"UpDown",
-	"RightLeft",
-	"LeftRight",
+	"combined_updown",
+	"combined_rightleft",
+	"combined_leftright",
+	"combined_downup",
 };
 */
-
