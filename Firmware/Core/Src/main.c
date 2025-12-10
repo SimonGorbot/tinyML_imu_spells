@@ -59,12 +59,13 @@ UART_HandleTypeDef huart2;
 uint16_t id_class = 0;                                  // Point to id class (see argument of neai_classification fct)
 float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input values
 float output_class_buffer[CLASS_NUMBER];                // Buffer of class probabilities
-const char *id2class[CLASS_NUMBER + 1] = {
-    // Buffer for mapping class id to class name
-    "unknown",
-    "up_down_formatted",
-    "right_left_formatted",
-    "left_right_simon_formatted",
+const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
+	"unknown",
+	"updown_training",
+	"rightleft_training",
+	"leftright_training",
+	"downup_training",
+	"circle_training",
 };
 
 /* Data Collection Variables */
@@ -334,27 +335,50 @@ int main(void)
         {
           // Note: if raw_count < DATA_INPUT_USER we interpolate up to the model window
           // size so classification still runs on shorter captures.
+          uint8_t sorted_idx[CLASS_NUMBER];
+          for (int i = 0; i < CLASS_NUMBER; i++)
+          {
+            sorted_idx[i] = i;
+          }
+
+          for (int i = 0; i < CLASS_NUMBER - 1; i++)
+          {
+            for (int j = 0; j < CLASS_NUMBER - i - 1; j++)
+            {
+              if (output_class_buffer[sorted_idx[j]] < output_class_buffer[sorted_idx[j + 1]])
+              {
+                uint8_t temp = sorted_idx[j];
+                sorted_idx[j] = sorted_idx[j + 1];
+                sorted_idx[j + 1] = temp;
+              }
+            }
+          }
+
+          int len = 0;
           if (id_class > 0)
           {
-            // Only log the three class probabilities (output buffer is length CLASS_NUMBER)
-            int len = snprintf(buffer, sizeof(buffer),
-                               "Class: %s (Prob: %.2f) | UpDown=%.2f RightLeft=%.2f LeftRight=%.2f\r\n",
-                               id2class[id_class],
-                               output_class_buffer[id_class - 1],
-                               output_class_buffer[0],
-                               output_class_buffer[1],
-                               output_class_buffer[2]);
-            HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+            len += snprintf(buffer + len, sizeof(buffer) - len,
+                            "Class: %s (Prob: %.2f) | ",
+                            id2class[id_class],
+                            output_class_buffer[id_class - 1]);
           }
           else
           {
-            int len = snprintf(buffer, sizeof(buffer),
-                               "Class: unknown | UpDown=%.2f RightLeft=%.2f LeftRight=%.2f\r\n",
-                               output_class_buffer[0],
-                               output_class_buffer[1],
-                               output_class_buffer[2]);
-            HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+            len += snprintf(buffer + len, sizeof(buffer) - len, "Class: unknown | ");
           }
+
+          for (int i = 0; i < CLASS_NUMBER; i++)
+          {
+            if (len >= sizeof(buffer) - 1) break;
+            int idx = sorted_idx[i];
+            len += snprintf(buffer + len, sizeof(buffer) - len,
+                            "%s: %.2f ",
+                            id2class[idx + 1],
+                            output_class_buffer[idx]);
+          }
+          len += snprintf(buffer + len, sizeof(buffer) - len, "\r\n");
+
+          HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
         }
       }
     }
