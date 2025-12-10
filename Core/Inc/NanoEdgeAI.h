@@ -88,9 +88,9 @@ float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input value
 float output_class_buffer[CLASS_NUMBER]; // Buffer of class probabilities
 const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
 	"unknown",
-	"UpDown",
-	"RightLeft",
-	"LeftRight",
+	"up_down_formatted",
+	"right_left_formatted",
+	"left_right_simon_formatted",
 };
 */
 

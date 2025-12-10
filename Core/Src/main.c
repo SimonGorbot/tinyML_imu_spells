@@ -56,15 +56,15 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 /* NanoEdgeAI Variables */
-uint16_t id_class = 0;
-float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER];
-float output_class_buffer[CLASS_NUMBER];
+uint16_t id_class = 0;                                  // Point to id class (see argument of neai_classification fct)
+float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input values
+float output_class_buffer[CLASS_NUMBER];                // Buffer of class probabilities
 const char *id2class[CLASS_NUMBER + 1] = {
     // Buffer for mapping class id to class name
     "unknown",
-    "UpDown",
-    "RightLeft",
-    "LeftRight",
+    "up_down_formatted",
+    "right_left_formatted",
+    "left_right_simon_formatted",
 };
 
 /* Data Collection Variables */
@@ -170,8 +170,8 @@ static void MPU9250_Init(void)
     Error_Handler();
   }
 
-  /* Example configuration: 1 kHz / (1 + div) = 100 Hz */
-  (void)mpu9250_set_sample_rate_divider(&s_mpu9250_handle, 9);
+  /* Example configuration: 1 kHz / (1 + div) = 166 Hz (matches 906 samples ≈5.4 s) */
+  (void)mpu9250_set_sample_rate_divider(&s_mpu9250_handle, 5);
   (void)mpu9250_set_low_pass_filter(&s_mpu9250_handle, MPU9250_LOW_PASS_FILTER_3);
   (void)mpu9250_set_accelerometer_range(&s_mpu9250_handle, MPU9250_ACCELEROMETER_RANGE_2G);
   (void)mpu9250_set_gyroscope_range(&s_mpu9250_handle, MPU9250_GYROSCOPE_RANGE_250DPS);
@@ -306,26 +306,44 @@ int main(void)
     {
       if (raw_count > 0)
       {
-        // Normalize data to exactly DATA_INPUT_USER rows (200 as requested, set in header)
-        normalize_buffer(raw_data, raw_count, input_user_buffer, DATA_INPUT_USER);
+        char buffer[256];
+
+        // Cap to the expected window size (otherwise interpolate up to fit)
+        uint16_t samples_to_process = raw_count;
+        if (samples_to_process > DATA_INPUT_USER)
+        {
+          samples_to_process = DATA_INPUT_USER;
+        }
+
+        // Clear any stale data and normalize to the expected DATA_INPUT_USER rows
+        for (uint32_t i = 0; i < (DATA_INPUT_USER * AXIS_NUMBER); i++)
+        {
+          input_user_buffer[i] = 0.0f;
+        }
+        normalize_buffer(raw_data, samples_to_process, input_user_buffer, DATA_INPUT_USER);
 
         // Run Classification
         enum neai_state cls_status = neai_classification(input_user_buffer, output_class_buffer, &id_class);
 
-        char buffer[256];
-        if (cls_status != NEAI_OK) {
+        if (cls_status != NEAI_OK)
+        {
           int len = snprintf(buffer, sizeof(buffer), "NEAI Error: %d\r\n", cls_status);
           HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
-        } else {
+        }
+        else
+        {
+          // Note: if raw_count < DATA_INPUT_USER we interpolate up to the model window
+          // size so classification still runs on shorter captures.
           if (id_class > 0)
           {
+            // Only log the three class probabilities (output buffer is length CLASS_NUMBER)
             int len = snprintf(buffer, sizeof(buffer),
                                "Class: %s (Prob: %.2f) | UpDown=%.2f RightLeft=%.2f LeftRight=%.2f\r\n",
                                id2class[id_class],
                                output_class_buffer[id_class - 1],
                                output_class_buffer[0],
                                output_class_buffer[1],
-                               output_class_buffer[2]); // <--- Subtract 1 here
+                               output_class_buffer[2]);
             HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
           }
           else
