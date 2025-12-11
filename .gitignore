@@ -48,6 +48,7 @@ Thumbs.db
 
 # Python
 venv/
+.venv/
 runs/
 runs_normalized/
 runs_good/
