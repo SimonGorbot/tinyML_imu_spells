@@ -249,6 +249,10 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+  // Enable DWT Cycle Counter for timing. This must be done after clock configuration.
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
   MPU9250_Print_WhoAmI();
   MPU9250_Init();
 
@@ -324,8 +328,13 @@ int main(void)
         }
         normalize_buffer(raw_data, samples_to_process, input_user_buffer, DATA_INPUT_USER);
 
+        // --- Measure Inference Time START ---
+        DWT->CYCCNT = 0; // Reset cycle counter to 0
         // Run Classification
         enum neai_state cls_status = neai_classification(input_user_buffer, output_class_buffer, &id_class);
+        uint32_t cycle_count = DWT->CYCCNT; // Read cycle counter
+        float inference_time_us = (float)cycle_count * 1000000.0f / HAL_RCC_GetHCLKFreq();
+        // --- Measure Inference Time END ---
 
         if (cls_status != NEAI_OK)
         {
@@ -356,6 +365,8 @@ int main(void)
           }
 
           int len = 0;
+          len += snprintf(buffer + len, sizeof(buffer) - len, "Inference: %.2f us | ", inference_time_us);
+
           if (id_class > 0)
           {
             len += snprintf(buffer + len, sizeof(buffer) - len,
