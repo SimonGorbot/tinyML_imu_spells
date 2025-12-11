@@ -63,6 +63,7 @@ const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to cla
 	"unknown",
 	"updown_training",
 	"rightleft_training",
+	"lightning_training",
 	"leftright_training",
 	"downup_training",
 	"circle_training",
