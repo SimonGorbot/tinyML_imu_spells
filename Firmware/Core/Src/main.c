@@ -343,51 +343,26 @@ int main(void)
         }
         else
         {
-          // Note: if raw_count < DATA_INPUT_USER we interpolate up to the model window
-          // size so classification still runs on shorter captures.
-          uint8_t sorted_idx[CLASS_NUMBER];
-          for (int i = 0; i < CLASS_NUMBER; i++)
-          {
-            sorted_idx[i] = i;
-          }
-
-          for (int i = 0; i < CLASS_NUMBER - 1; i++)
-          {
-            for (int j = 0; j < CLASS_NUMBER - i - 1; j++)
-            {
-              if (output_class_buffer[sorted_idx[j]] < output_class_buffer[sorted_idx[j + 1]])
-              {
-                uint8_t temp = sorted_idx[j];
-                sorted_idx[j] = sorted_idx[j + 1];
-                sorted_idx[j + 1] = temp;
-              }
-            }
-          }
-
           int len = 0;
+          
+          // 1. Print Inference Time
           len += snprintf(buffer + len, sizeof(buffer) - len, "Inference: %.2f us | ", inference_time_us);
 
+          // 2. Print Best Class
           if (id_class > 0)
           {
+            // id_class is 1-based. Buffer index is id_class - 1.
             len += snprintf(buffer + len, sizeof(buffer) - len,
-                            "Class: %s (Prob: %.2f) | ",
+                            "Class: %s (Prob: %.2f)", 
                             id2class[id_class],
                             output_class_buffer[id_class - 1]);
           }
           else
           {
-            len += snprintf(buffer + len, sizeof(buffer) - len, "Class: unknown | ");
+            len += snprintf(buffer + len, sizeof(buffer) - len, "Class: unknown");
           }
 
-          for (int i = 0; i < CLASS_NUMBER; i++)
-          {
-            if (len >= sizeof(buffer) - 1) break;
-            int idx = sorted_idx[i];
-            len += snprintf(buffer + len, sizeof(buffer) - len,
-                            "%s: %.2f ",
-                            id2class[idx + 1],
-                            output_class_buffer[idx]);
-          }
+          // 3. Add Newline
           len += snprintf(buffer + len, sizeof(buffer) - len, "\r\n");
 
           HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
