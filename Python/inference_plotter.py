@@ -91,7 +91,8 @@ def format_model_id(model_id):
         'hm': 'In-House', 
         'ne': 'NanoEdge', 
         'mlp': 'MLP', 
-        'rf': 'RF'
+        'rf': 'RF',
+        'svm': 'SVM'
     }
     parts = model_id.split('_')
     if len(parts) == 2:
@@ -106,6 +107,7 @@ def plot_gesture_metrics(df, plots_dir):
     gestures = df['ground_truth'].unique()
     
     for gesture in gestures:
+        print(f"\nStats for Gesture: {gesture}")
         gesture_df = df[df['ground_truth'] == gesture]
         models = sorted(gesture_df['model_id'].unique())
         
@@ -135,10 +137,11 @@ def plot_gesture_metrics(df, plots_dir):
             
             time_means.append(t_mean)
             time_cis.append(t_ci)
+            
+            print(f"  - {format_model_id(model):<20}: Acc={acc:.2%}, Time={t_mean:.2f} us")
 
         # --- Plotting ---
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-        fig.suptitle(f'Metrics for Gesture: {gesture}', fontsize=16)
         
         x_pos = np.arange(len(models))
         model_labels = [format_model_id(m) for m in models]
@@ -152,7 +155,6 @@ def plot_gesture_metrics(df, plots_dir):
         ax1.set_xticklabels(model_labels, rotation=45, ha='right')
         ax1.set_ylabel('Accuracy')
         ax1.set_ylim(0, 1.1)
-        ax1.set_title('Classification Accuracy')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
         
         # Time Subplot
@@ -160,7 +162,6 @@ def plot_gesture_metrics(df, plots_dir):
         ax2.set_xticks(x_pos)
         ax2.set_xticklabels(model_labels, rotation=45, ha='right')
         ax2.set_ylabel('Time (us)')
-        ax2.set_title('Inference Time')
         ax2.grid(axis='y', linestyle='--', alpha=0.5)
         
         plt.tight_layout()
@@ -186,8 +187,6 @@ def plot_confusion_matrices(df, plots_dir):
         
         plt.figure(figsize=(8, 7))
         plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-        plt.title(f'Confusion Matrix: {format_model_id(model)}')
-        plt.colorbar()
         
         tick_marks = np.arange(len(classes))
         plt.xticks(tick_marks, classes, rotation=45, ha='right')
@@ -212,6 +211,31 @@ def plot_confusion_matrices(df, plots_dir):
         plt.close()
         print(f"Saved confusion matrix for model '{model}' to {filename}")
 
+def print_overall_metrics(df):
+    """
+    Prints the overall accuracy and inference time for each model across all gestures.
+    """
+    print("\n=== Overall Model Performance ===")
+    models = sorted(df['model_id'].unique())
+    
+    # Header
+    print(f"{'Model':<25} | {'Accuracy':<10} | {'Avg Time (us)':<15}")
+    print("-" * 56)
+
+    for model in models:
+        model_df = df[df['model_id'] == model]
+        
+        # Accuracy
+        is_correct = (model_df['predicted'] == model_df['ground_truth']).astype(int)
+        acc = np.mean(is_correct)
+        
+        # Time
+        times = model_df['Inference Time (us)']
+        t_mean = np.mean(times)
+        
+        print(f"{format_model_id(model):<25} | {acc:.2%}     | {t_mean:.2f}")
+    print("=================================\n")
+
 def main():
     """Main function to run the analysis and plotting."""
     print("Starting inference analysis...")
@@ -220,6 +244,8 @@ def main():
     
     if not df.empty:
         os.makedirs(PLOTS_DIR, exist_ok=True)
+        
+        print_overall_metrics(df)
         
         print("\n--- Generating Gesture Metrics Plots ---")
         plot_gesture_metrics(df, PLOTS_DIR)
