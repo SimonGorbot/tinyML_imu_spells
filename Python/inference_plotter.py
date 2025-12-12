@@ -211,6 +211,70 @@ def plot_confusion_matrices(df, plots_dir):
         plt.close()
         print(f"Saved confusion matrix for model '{model}' to {filename}")
 
+def plot_overall_metrics(df, plots_dir):
+    """
+    Creates bar charts for overall performance comparing models (Accuracy & Time).
+    """
+    print("\n--- Generating Overall Metrics Plot ---")
+    models = sorted(df['model_id'].unique())
+    
+    acc_means, acc_cis = [], []
+    time_means, time_cis = [], []
+    
+    for model in models:
+        model_data = df[df['model_id'] == model]
+        
+        # --- Accuracy Stats ---
+        is_correct = (model_data['predicted'] == model_data['ground_truth']).astype(int)
+        acc = np.mean(is_correct)
+        n = len(is_correct)
+        # 95% CI for proportion (Wald interval)
+        acc_ci = 1.96 * np.sqrt((acc * (1 - acc)) / n) if n > 0 else 0
+        
+        acc_means.append(acc)
+        acc_cis.append(acc_ci)
+        
+        # --- Time Stats ---
+        times = model_data['Inference Time (us)']
+        t_mean = np.mean(times)
+        t_sem = st.sem(times)
+        # 95% CI for mean
+        t_ci = t_sem * st.t.ppf((1 + 0.95) / 2., len(times)-1) if len(times) > 1 else 0
+        
+        time_means.append(t_mean)
+        time_cis.append(t_ci)
+
+    # --- Plotting ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    x_pos = np.arange(len(models))
+    model_labels = [format_model_id(m) for m in models]
+    
+    colors = plt.get_cmap('tab10')(np.linspace(0, 1, len(models)))
+    
+    # Accuracy Subplot
+    ax1.bar(x_pos, acc_means, yerr=acc_cis, capsize=5, color=colors, alpha=0.8)
+    ax1.set_xticks(x_pos)
+    ax1.set_xticklabels(model_labels, rotation=45, ha='right')
+    ax1.set_ylabel('Overall Accuracy')
+    ax1.set_ylim(0, 1.1)
+    ax1.set_title('Overall Accuracy per Model')
+    ax1.grid(axis='y', linestyle='--', alpha=0.5)
+    
+    # Time Subplot
+    ax2.bar(x_pos, time_means, yerr=time_cis, capsize=5, color=colors, alpha=0.8)
+    ax2.set_xticks(x_pos)
+    ax2.set_xticklabels(model_labels, rotation=45, ha='right')
+    ax2.set_ylabel('Average Inference Time (us)')
+    ax2.set_title('Overall Inference Time per Model')
+    ax2.grid(axis='y', linestyle='--', alpha=0.5)
+    
+    plt.tight_layout()
+    filename = os.path.join(plots_dir, 'overall_metrics.png')
+    plt.savefig(filename)
+    plt.close()
+    print(f"Saved overall metrics plot to {filename}")
+
 def print_overall_metrics(df):
     """
     Prints the overall accuracy and inference time for each model across all gestures.
@@ -249,6 +313,7 @@ def main():
         
         print("\n--- Generating Gesture Metrics Plots ---")
         plot_gesture_metrics(df, PLOTS_DIR)
+        plot_overall_metrics(df, PLOTS_DIR)
         
         print("\n--- Generating Confusion Matrices ---")
         plot_confusion_matrices(df, PLOTS_DIR)
