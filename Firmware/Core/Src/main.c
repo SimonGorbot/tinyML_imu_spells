@@ -22,20 +22,24 @@
 #include <string.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "NanoEdgeAI.h"
-#include "knowledge.h"
+#include "rf_model.h"
 #include "driver_mpu9250.h"
 #include "driver_mpu9250_interface.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-typedef union
-{
-  int16_t i16bit[3];
-  uint8_t u8bit[6];
-} axis3bit16_t;
-/* USER CODE END PTD */
+/* USER CODE BEGIN PD */
+
+// Last IMU sample read (for convenience/logging)
+float Ax, Ay, Az, Gx, Gy, Gz;
+
+// We are using 3 accel + 3 gyro axes
+#define AXIS_NUMBER 6U
+
+// RF model feature dimension: max index in rf_model.c is 596 -> 597 features
+#define RF_FEATURE_DIM 597U
+
+/* USER CODE END PD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
@@ -55,22 +59,24 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-/* NanoEdgeAI Variables */
-uint16_t id_class = 0;                                  // Point to id class (see argument of neai_classification fct)
-float input_user_buffer[DATA_INPUT_USER * AXIS_NUMBER]; // Buffer of input values
-float output_class_buffer[CLASS_NUMBER];                // Buffer of class probabilities
-const char *id2class[CLASS_NUMBER + 1] = { // Buffer for mapping class id to class name
-	"unknown",
-	"updown_training",
-	"rightleft_training",
-	"leftright_training",
-	"downup_training",
-	"circle_training",
-};
 
-/* Data Collection Variables */
+// Raw data buffer: up to MAX_RAW_SAMPLES samples, each with AXIS_NUMBER channels.
+// Layout: [sample0_ax, sample0_ay, ..., sample0_gz, sample1_ax, ...]
 float raw_data[MAX_RAW_SAMPLES * AXIS_NUMBER];
 uint16_t raw_count = 0;
+
+// Feature buffer for the Random Forest model
+int16_t rf_features[RF_FEATURE_DIM];
+
+// Class label mapping for RF model outputs [0..5]
+static const char *rf_class_names[6] = {
+    "circle",
+    "downup",
+    "leftright",
+    "lightning",
+    "rightleft",
+    "updown",
+};
 
 /* USER CODE END PV */
 
@@ -84,6 +90,13 @@ static void normalize_buffer(float *source, uint16_t source_len, float *dest, ui
 static void MPU9250_Init(void);
 static void MPU9250_Print_WhoAmI(void);
 static uint8_t MPU9250_ReadRaw(void);
+
+// Build the RF feature vector from the recorded raw IMU samples
+static void build_rf_features(const float *source, uint16_t source_len,
+                              int16_t *dest, uint16_t dest_len);
+
+// Run the RF classifier on the latest recording and print result over UART
+static void classify_with_rf(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -176,8 +189,6 @@ static void MPU9250_Init(void)
   (void)mpu9250_set_low_pass_filter(&s_mpu9250_handle, MPU9250_LOW_PASS_FILTER_3);
   (void)mpu9250_set_accelerometer_range(&s_mpu9250_handle, MPU9250_ACCELEROMETER_RANGE_2G);
   (void)mpu9250_set_gyroscope_range(&s_mpu9250_handle, MPU9250_GYROSCOPE_RANGE_250DPS);
-
-
 }
 
 static uint8_t MPU9250_ReadRaw(void)
@@ -212,6 +223,84 @@ static uint8_t MPU9250_ReadRaw(void)
   Gz = (float)gyro_raw[0][2];
 
   return 0; // Success
+}
+
+static void build_rf_features(const float *source, uint16_t source_len,
+                              int16_t *dest, uint16_t dest_len)
+{
+  // The training data uses 100 samples * 6 axes flattened to int16 (600 columns).
+  // The exported RF model touches indices up to 596, so we resample to 100 samples,
+  // flatten, and truncate/pad to RF_FEATURE_DIM.
+  const uint16_t target_samples = 100U;
+  float resampled[target_samples * AXIS_NUMBER];
+
+  // Clamp source_len to available buffer and avoid div-by-zero
+  if (source_len == 0)
+  {
+    memset(dest, 0, dest_len * sizeof(int16_t));
+    return;
+  }
+  uint16_t used_samples = source_len;
+  if (used_samples > MAX_RAW_SAMPLES)
+  {
+    used_samples = MAX_RAW_SAMPLES;
+  }
+
+  normalize_buffer((float *)source, used_samples, resampled, target_samples);
+
+  uint32_t total_feats = target_samples * AXIS_NUMBER;
+  if (total_feats > dest_len)
+  {
+    total_feats = dest_len; // truncate extra features
+  }
+
+  for (uint32_t i = 0; i < total_feats; i++)
+  {
+    // Direct cast mirrors the int16 training data
+    dest[i] = (int16_t)resampled[i];
+  }
+
+  // Zero any unused tail
+  for (uint32_t i = total_feats; i < dest_len; i++)
+  {
+    dest[i] = 0;
+  }
+}
+
+static void classify_with_rf(void)
+{
+  if (raw_count == 0)
+  {
+    // Nothing recorded
+    const char *msg = "RF: no samples recorded, skipping classification\r\n";
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+    return;
+  }
+
+  // Build feature vector for the RF model
+  // source_len here is "raw_count" samples, each of AXIS_NUMBER floats
+  build_rf_features(raw_data, raw_count, rf_features, RF_FEATURE_DIM);
+
+  // --- Measure Inference Time START ---
+  DWT->CYCCNT = 0; // Reset cycle counter to 0
+
+  // Run the RF model (6-class classifier)
+  int32_t cls = rf_perf_25_6_predict(rf_features, RF_FEATURE_DIM);
+
+  uint32_t cycle_count = DWT->CYCCNT; // Read cycle counter
+  float inference_time_us = (float)cycle_count * 1000000.0f / HAL_RCC_GetHCLKFreq();
+
+  const char *label = "out_of_range";
+  if (cls >= 0 && cls < 6)
+  {
+    label = rf_class_names[cls];
+  }
+
+  char buffer[128];
+  int len = snprintf(buffer, sizeof(buffer),
+                     "Inference: %.2f us | Class: %s (Prob: %.2f)\r\n",
+                     inference_time_us, label, 1.00f);
+  HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, HAL_MAX_DELAY);
 }
 
 /* USER CODE END 0 */
@@ -250,16 +339,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   MPU9250_Print_WhoAmI();
   MPU9250_Init();
-
-  // Initialize NanoEdge AI with the knowledge buffer
-  enum neai_state status = neai_classification_init(knowledge);
-  if (status != NEAI_OK)
-  {
-    char buffer[50];
-    int len = snprintf(buffer, sizeof(buffer), "NEAI Init Error: %d\r\n", status);
-    HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
-  }
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -305,80 +384,18 @@ int main(void)
     // 3. Detect the end of a press (Rising Edge: Pressed -> Released)
     if (btn_prev == GPIO_PIN_RESET && btn_curr == GPIO_PIN_SET)
     {
-      if (raw_count > 0)
+      // 3. Detect the end of a press (Rising Edge: Pressed -> Released)
+      if (btn_prev == GPIO_PIN_RESET && btn_curr == GPIO_PIN_SET)
       {
-        char buffer[256];
-
-        // Cap to the expected window size (otherwise interpolate up to fit)
-        uint16_t samples_to_process = raw_count;
-        if (samples_to_process > DATA_INPUT_USER)
+        if (raw_count > 0)
         {
-          samples_to_process = DATA_INPUT_USER;
-        }
+          // Run Random Forest classifier on the recorded gesture
+          classify_with_rf();
 
-        // Clear any stale data and normalize to the expected DATA_INPUT_USER rows
-        for (uint32_t i = 0; i < (DATA_INPUT_USER * AXIS_NUMBER); i++)
-        {
-          input_user_buffer[i] = 0.0f;
-        }
-        normalize_buffer(raw_data, samples_to_process, input_user_buffer, DATA_INPUT_USER);
-
-        // Run Classification
-        enum neai_state cls_status = neai_classification(input_user_buffer, output_class_buffer, &id_class);
-
-        if (cls_status != NEAI_OK)
-        {
-          int len = snprintf(buffer, sizeof(buffer), "NEAI Error: %d\r\n", cls_status);
-          HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
-        }
-        else
-        {
-          // Note: if raw_count < DATA_INPUT_USER we interpolate up to the model window
-          // size so classification still runs on shorter captures.
-          uint8_t sorted_idx[CLASS_NUMBER];
-          for (int i = 0; i < CLASS_NUMBER; i++)
-          {
-            sorted_idx[i] = i;
-          }
-
-          for (int i = 0; i < CLASS_NUMBER - 1; i++)
-          {
-            for (int j = 0; j < CLASS_NUMBER - i - 1; j++)
-            {
-              if (output_class_buffer[sorted_idx[j]] < output_class_buffer[sorted_idx[j + 1]])
-              {
-                uint8_t temp = sorted_idx[j];
-                sorted_idx[j] = sorted_idx[j + 1];
-                sorted_idx[j + 1] = temp;
-              }
-            }
-          }
-
-          int len = 0;
-          if (id_class > 0)
-          {
-            len += snprintf(buffer + len, sizeof(buffer) - len,
-                            "Class: %s (Prob: %.2f) | ",
-                            id2class[id_class],
-                            output_class_buffer[id_class - 1]);
-          }
-          else
-          {
-            len += snprintf(buffer + len, sizeof(buffer) - len, "Class: unknown | ");
-          }
-
-          for (int i = 0; i < CLASS_NUMBER; i++)
-          {
-            if (len >= sizeof(buffer) - 1) break;
-            int idx = sorted_idx[i];
-            len += snprintf(buffer + len, sizeof(buffer) - len,
-                            "%s: %.2f ",
-                            id2class[idx + 1],
-                            output_class_buffer[idx]);
-          }
-          len += snprintf(buffer + len, sizeof(buffer) - len, "\r\n");
-
-          HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, 1000);
+          // Optionally clear raw_count so the next gesture starts fresh
+          // (We also reset raw_count on the button-press edge, so this
+          // is mostly to avoid confusion when debugging.)
+          // raw_count = 0;
         }
       }
     }
