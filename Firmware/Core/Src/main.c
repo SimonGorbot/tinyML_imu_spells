@@ -22,7 +22,8 @@
 #include <string.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "rf_model.h"
+#include "mlp_model.h"
+#include "mlp_scaler.h"
 #include "driver_mpu9250.h"
 #include "driver_mpu9250_interface.h"
 /* USER CODE END Includes */
@@ -36,14 +37,13 @@ float Ax, Ay, Az, Gx, Gy, Gz;
 // We are using 3 accel + 3 gyro axes
 #define AXIS_NUMBER 6U
 
-// RF model feature dimension: max index in rf_model.c is 596 -> 597 features
-#define RF_FEATURE_DIM 597U
+// MLP model feature dimension: 100 samples * 6 axes
+#define MLP_FEATURE_DIM 600U
 
 /* USER CODE END PD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-float Ax, Ay, Az, Gx, Gy, Gz;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -65,11 +65,11 @@ UART_HandleTypeDef huart2;
 float raw_data[MAX_RAW_SAMPLES * AXIS_NUMBER];
 uint16_t raw_count = 0;
 
-// Feature buffer for the Random Forest model
-int16_t rf_features[RF_FEATURE_DIM];
+// Feature buffer for the MLP model
+float mlp_features[MLP_FEATURE_DIM];
 
-// Class label mapping for RF model outputs [0..5]
-static const char *rf_class_names[6] = {
+// Class label mapping for model outputs [0..5]
+static const char *mlp_class_names[6] = {
     "circle",
     "downup",
     "leftright",
@@ -91,12 +91,12 @@ static void MPU9250_Init(void);
 static void MPU9250_Print_WhoAmI(void);
 static uint8_t MPU9250_ReadRaw(void);
 
-// Build the RF feature vector from the recorded raw IMU samples
-static void build_rf_features(const float *source, uint16_t source_len,
-                              int16_t *dest, uint16_t dest_len);
+// Build the MLP feature vector from the recorded raw IMU samples
+static void build_mlp_features(const float *source, uint16_t source_len,
+                               float *dest, uint16_t dest_len);
 
-// Run the RF classifier on the latest recording and print result over UART
-static void classify_with_rf(void);
+// Run the MLP classifier on the latest recording and print result over UART
+static void classify_with_mlp(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -225,19 +225,17 @@ static uint8_t MPU9250_ReadRaw(void)
   return 0; // Success
 }
 
-static void build_rf_features(const float *source, uint16_t source_len,
-                              int16_t *dest, uint16_t dest_len)
+static void build_mlp_features(const float *source, uint16_t source_len,
+                               float *dest, uint16_t dest_len)
 {
-  // The training data uses 100 samples * 6 axes flattened to int16 (600 columns).
-  // The exported RF model touches indices up to 596, so we resample to 100 samples,
-  // flatten, and truncate/pad to RF_FEATURE_DIM.
+  // The training data uses 100 samples * 6 axes flattened to float (600 columns).
   const uint16_t target_samples = 100U;
   float resampled[target_samples * AXIS_NUMBER];
 
   // Clamp source_len to available buffer and avoid div-by-zero
   if (source_len == 0)
   {
-    memset(dest, 0, dest_len * sizeof(int16_t));
+    memset(dest, 0, dest_len * sizeof(float));
     return;
   }
   uint16_t used_samples = source_len;
@@ -254,52 +252,79 @@ static void build_rf_features(const float *source, uint16_t source_len,
     total_feats = dest_len; // truncate extra features
   }
 
+  // Copy and scale to match Python StandardScaler used in training
   for (uint32_t i = 0; i < total_feats; i++)
   {
-    // Direct cast mirrors the int16 training data
-    dest[i] = (int16_t)resampled[i];
+    float centered = resampled[i] - MLP_MEAN[i];
+    float scale = MLP_SCALE[i];
+    if (scale != 0.0f)
+    {
+      dest[i] = centered / scale;
+    }
+    else
+    {
+      dest[i] = centered;
+    }
   }
 
   // Zero any unused tail
   for (uint32_t i = total_feats; i < dest_len; i++)
   {
-    dest[i] = 0;
+    dest[i] = 0.0f;
   }
 }
 
-static void classify_with_rf(void)
+static void classify_with_mlp(void)
 {
   if (raw_count == 0)
   {
     // Nothing recorded
-    const char *msg = "RF: no samples recorded, skipping classification\r\n";
+    const char *msg = "MLP: no samples recorded, skipping classification\r\n";
     HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
     return;
   }
 
-  // Build feature vector for the RF model
+  // Build feature vector for the MLP model
   // source_len here is "raw_count" samples, each of AXIS_NUMBER floats
-  build_rf_features(raw_data, raw_count, rf_features, RF_FEATURE_DIM);
+  build_mlp_features(raw_data, raw_count, mlp_features, MLP_FEATURE_DIM);
 
   // --- Measure Inference Time START ---
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
   DWT->CYCCNT = 0; // Reset cycle counter to 0
 
-  // Run the RF model (6-class classifier)
-  int32_t cls = rf_perf_25_6_predict(rf_features, RF_FEATURE_DIM);
+  // Run the MLP model (6-class classifier)
+  float probs[6] = {0};
+  const int n_classes = (int)(sizeof(probs) / sizeof(probs[0]));
+  int32_t err = mlp_perf__32_32__1e_05_regress(mlp_features, MLP_FEATURE_DIM, probs, n_classes);
 
   uint32_t cycle_count = DWT->CYCCNT; // Read cycle counter
   float inference_time_us = (float)cycle_count * 1000000.0f / HAL_RCC_GetHCLKFreq();
 
-  const char *label = "out_of_range";
-  if (cls >= 0 && cls < 6)
+  int32_t cls = -1;
+  float prob = 0.0f;
+  if (err == 0)
   {
-    label = rf_class_names[cls];
+    for (int i = 0; i < n_classes; i++)
+    {
+      if (probs[i] > prob)
+      {
+        prob = probs[i];
+        cls = i;
+      }
+    }
+  }
+
+  const char *label = "out_of_range";
+  if (cls >= 0 && cls < n_classes)
+  {
+    label = mlp_class_names[cls];
   }
 
   char buffer[128];
   int len = snprintf(buffer, sizeof(buffer),
                      "Inference: %.2f us | Class: %s (Prob: %.2f)\r\n",
-                     inference_time_us, label, 1.00f);
+                     inference_time_us, label, prob);
   HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, HAL_MAX_DELAY);
 }
 
@@ -384,19 +409,13 @@ int main(void)
     // 3. Detect the end of a press (Rising Edge: Pressed -> Released)
     if (btn_prev == GPIO_PIN_RESET && btn_curr == GPIO_PIN_SET)
     {
-      // 3. Detect the end of a press (Rising Edge: Pressed -> Released)
-      if (btn_prev == GPIO_PIN_RESET && btn_curr == GPIO_PIN_SET)
+      if (raw_count > 0)
       {
-        if (raw_count > 0)
-        {
-          // Run Random Forest classifier on the recorded gesture
-          classify_with_rf();
+        // Run MLP classifier on the recorded gesture
+        classify_with_mlp();
 
-          // Optionally clear raw_count so the next gesture starts fresh
-          // (We also reset raw_count on the button-press edge, so this
-          // is mostly to avoid confusion when debugging.)
-          // raw_count = 0;
-        }
+        // Optionally clear raw_count so the next gesture starts fresh
+        // raw_count = 0;
       }
     }
 
