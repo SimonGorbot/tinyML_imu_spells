@@ -31,7 +31,7 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*
 #include <stdint.h>
 
 /* Define */
-#define NEAI_ID "693b1a3c2c86c4cb08b7aba8"
+#define NEAI_ID "693b72362c86c4cb08b7ad0f"
 #define AXIS_NUMBER 6
 #define DATA_INPUT_USER 100
 #define CLASS_NUMBER 6
