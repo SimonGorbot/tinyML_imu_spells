@@ -57,4 +57,5 @@ Folder structure:
 * `data/` raw CSVs
 * `firmware/` MCU project that runs inference + measures latency/memory
 * `Python/` data collection + preprocessing + plotting + export steps
-* `home-made` Notebooks for develeopment of home-made models using scikit
+* `home-made/` notebooks for develeopment of home-made models using scikit
+* `report.pdf` is the final report submitted for our open-ended "Intro to AI" class project
